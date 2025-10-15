@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 import { sql } from '@vercel/postgres';
 
 const json = (body, status = 200) =>
@@ -13,7 +16,6 @@ const json = (body, status = 200) =>
 
 export async function OPTIONS() { return json({}, 204); }
 
-// GET /api/project/:id — public read
 export async function GET(_req, { params }) {
   const id = decodeURIComponent((params?.id || '')).trim();
   if (!id) return json({ error: 'Missing id' }, 400);
@@ -36,7 +38,6 @@ export async function GET(_req, { params }) {
   });
 }
 
-// POST /api/project/:id — admin update (X-Admin-Key)
 export async function POST(req, { params }) {
   const adminKey = req.headers.get('x-admin-key') || '';
   if (adminKey !== process.env.ADMIN_KEY) return json({ error: 'Unauthorized' }, 401);
