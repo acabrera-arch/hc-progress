@@ -1,6 +1,6 @@
 import { sql } from '@vercel/postgres';
 
-const json = (body: unknown, status = 200) =>
+const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -14,8 +14,8 @@ const json = (body: unknown, status = 200) =>
 export async function OPTIONS() { return json({}, 204); }
 
 // GET /api/project/:id — public read
-export async function GET(_: Request, { params }: { params: { id: string } }) {
-  const id = decodeURIComponent(params.id || '').trim();
+export async function GET(_req, { params }) {
+  const id = decodeURIComponent((params?.id || '')).trim();
   if (!id) return json({ error: 'Missing id' }, 400);
 
   const { rows } = await sql`
@@ -37,14 +37,14 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
 }
 
 // POST /api/project/:id — admin update (X-Admin-Key)
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req, { params }) {
   const adminKey = req.headers.get('x-admin-key') || '';
   if (adminKey !== process.env.ADMIN_KEY) return json({ error: 'Unauthorized' }, 401);
 
-  const id = decodeURIComponent(params.id || '').trim();
+  const id = decodeURIComponent((params?.id || '')).trim();
   if (!id) return json({ error: 'Missing id' }, 400);
 
-  let payload: any = {};
+  let payload = {};
   try { payload = await req.json(); } catch {}
   const client_name = payload.client_name ?? '';
   const status = payload.status ?? '';
