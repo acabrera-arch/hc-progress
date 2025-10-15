@@ -1,5 +1,7 @@
-import { sql } from '@vercel/postgres';
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
+import { sql } from '@vercel/postgres';
 export async function GET() {
   await sql`
     CREATE TABLE IF NOT EXISTS projects (
@@ -11,9 +13,6 @@ export async function GET() {
     );
   `;
   return new Response(JSON.stringify({ ok: true }), {
-    headers: {
-      'content-type': 'application/json',
-      'access-control-allow-origin': '*'
-    }
+    headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' }
   });
 }
