@@ -18,41 +18,70 @@ export async function OPTIONS() {
   return json({}, 204);
 }
 
-// 📌 GET — retrieve project data by ID
+// GET /api/project/[id]
 export async function GET(_req, { params }) {
   const id = decodeURIComponent(params?.id || '').trim();
   if (!id) return json({ error: 'Missing id' }, 400);
 
   try {
-    const { rows } = await sql`SELECT * FROM projects WHERE id = ${id}`;
+    const { rows } = await sql`
+      SELECT project_id, client_name, status, steps_json, updated_at
+      FROM projects
+      WHERE project_id = ${id}
+      LIMIT 1
+    `;
     if (!rows.length) return json({ error: 'Not found' }, 404);
-    return json(rows[0]);
+
+    const row = rows[0];
+    // Return a friendly shape the frontend expects
+    return json({
+      project_id: row.project_id,
+      client_name: row.client_name,
+      status: row.status,
+      steps: row.steps_json ?? [],
+      updated_at: row.updated_at,
+    });
   } catch (err) {
     console.error(err);
     return json({ error: 'Database error', details: err.message }, 500);
   }
 }
 
-// 📌 POST — add or update project data
+// POST /api/project/[id]
 export async function POST(req, { params }) {
   const id = decodeURIComponent(params?.id || '').trim();
   if (!id) return json({ error: 'Missing id' }, 400);
 
-  const body = await req.json();
-  const { client_name, status, steps } = body;
   const key = req.headers.get('x-admin-key');
-
-  // 🔑 Replace with your actual admin key
   if (key !== process.env.ADMIN_KEY) {
     return json({ error: 'Unauthorized' }, 401);
   }
 
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const client_name = (body.client_name || '').trim();
+  const status = (body.status || '').trim();
+  const steps = Array.isArray(body.steps) ? body.steps : [];
+
+  if (!client_name || !status) {
+    return json({ error: 'Missing client_name or status' }, 400);
+  }
+
   try {
     await sql`
-      INSERT INTO projects (id, client_name, status, steps)
-      VALUES (${id}, ${client_name}, ${status}, ${JSON.stringify(steps)})
-      ON CONFLICT (id)
-      DO UPDATE SET client_name = ${client_name}, status = ${status}, steps = ${JSON.stringify(steps)};
+      INSERT INTO projects (project_id, client_name, status, steps_json, updated_at)
+      VALUES (${id}, ${client_name}, ${status}, ${JSON.stringify(steps)}, NOW())
+      ON CONFLICT (project_id)
+      DO UPDATE SET
+        client_name = EXCLUDED.client_name,
+        status      = EXCLUDED.status,
+        steps_json  = EXCLUDED.steps_json,
+        updated_at  = NOW()
     `;
     return json({ ok: true });
   } catch (err) {
