@@ -18,7 +18,7 @@ export async function OPTIONS() {
   return json({}, 204);
 }
 
-// GET /api/project/[id]
+// GET
 export async function GET(_req, { params }) {
   const id = decodeURIComponent(params?.id || '').trim();
   if (!id) return json({ error: 'Missing id' }, 400);
@@ -33,7 +33,6 @@ export async function GET(_req, { params }) {
     if (!rows.length) return json({ error: 'Not found' }, 404);
 
     const row = rows[0];
-    // Return a friendly shape the frontend expects
     return json({
       project_id: row.project_id,
       client_name: row.client_name,
@@ -47,7 +46,7 @@ export async function GET(_req, { params }) {
   }
 }
 
-// POST /api/project/[id]
+// POST
 export async function POST(req, { params }) {
   const id = decodeURIComponent(params?.id || '').trim();
   if (!id) return json({ error: 'Missing id' }, 400);
