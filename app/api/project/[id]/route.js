@@ -3,20 +3,25 @@ export const runtime = 'nodejs';
 
 import { sql } from '@vercel/postgres';
 
-/* =========================
-   🔐 CORS HELPERS
-========================= */
+/* ===== CORS (same as your [id] route) ===== */
 const ALLOWED = (process.env.ALLOWED_ORIGINS ??
   'https://harwoodcarpentry.pro,https://www.harwoodcarpentry.pro')
   .split(',')
   .map(s => s.trim());
+
+// Add localhost automatically for dev convenience
+if (process.env.NODE_ENV !== 'production') {
+  ['http://localhost:3000', 'http://127.0.0.1:3000'].forEach(o => {
+    if (!ALLOWED.includes(o)) ALLOWED.push(o);
+  });
+}
 
 function buildCorsHeaders(origin) {
   const allowOrigin = origin && ALLOWED.includes(origin) ? origin : '';
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Vary': 'Origin',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key',
     'Access-Control-Max-Age': '86400',
     ...(allowOrigin ? { 'Access-Control-Allow-Credentials': 'true' } : {}),
@@ -26,10 +31,7 @@ function buildCorsHeaders(origin) {
 function json(body, status = 200, origin = null) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: {
-      'Content-Type': 'application/json',
-      ...buildCorsHeaders(origin),
-    },
+    headers: { 'Content-Type': 'application/json', ...buildCorsHeaders(origin) },
   });
 }
 
@@ -38,9 +40,7 @@ export async function OPTIONS(req) {
   return new Response(null, { status: 204, headers: buildCorsHeaders(origin) });
 }
 
-/* =========================
-   🧭 STEP TEMPLATE + NORMALIZER
-========================= */
+/* ===== Step template + normalizer (same as [id]) ===== */
 const DEFAULT_STEPS = [
   { id: 'inquiry',     title: 'Inquiry Received',           note: '', date: '', done: false },
   { id: 'intake',      title: 'Discovery Call',             note: '', date: '', done: false },
@@ -68,57 +68,36 @@ function normalizeSteps(input) {
     return {
       id: s.id,
       title: o.title ?? s.title,
-      note: o.note ?? s.note ?? '',
-      date: o.date ?? s.date ?? '',
+      note: o.note ?? '',
+      date: o.date ?? '',
       done: !!o.done,
     };
   });
 }
 
-/* =========================
-   📥 GET /api/project/[id]
-========================= */
-export async function GET(req, { params }) {
-  const origin = req.headers.get('origin');
-  const id = decodeURIComponent(params?.id || '').trim();
-  if (!id) return json({ error: 'Missing id' }, 400, origin);
-
-  try {
-    const { rows } = await sql`
-      SELECT project_id, client_name, status, steps_json, updated_at
-      FROM projects
-      WHERE project_id = ${id}
-      LIMIT 1
-    `;
-    if (!rows.length) return json({ error: 'Not found' }, 404, origin);
-
-    const row = rows[0];
-    const steps = normalizeSteps(row.steps_json);
-
-    return json({
-      project_id: row.project_id,
-      client_name: row.client_name,
-      status: row.status,
-      steps,
-      updated_at: row.updated_at,
-    }, 200, origin);
-  } catch (err) {
-    console.error(err);
-    return json({ error: 'Database error', details: err.message }, 500, origin);
-  }
+/* ===== Helper: generate next ID like HC-2025-003 ===== */
+async function generateNextId(year) {
+  const like = `HC-${year}-%`;
+  const pattern = `HC-${year}-(\\d{3})`;
+  const { rows } = await sql`
+    SELECT COALESCE(MAX(CAST(SUBSTRING(project_id FROM ${pattern}) AS INT)), 0) AS last
+    FROM projects
+    WHERE project_id LIKE ${like}
+  `;
+  const next = Number(rows?.[0]?.last ?? 0) + 1;
+  return `HC-${year}-${String(next).padStart(3, '0')}`;
 }
 
-/* =========================
-   ✍️ POST /api/project/[id]
-   (Upsert project + steps)
-========================= */
-export async function POST(req, { params }) {
+/* ===== POST /api/project  (auto-create) =====
+ Body: { client_name: string, status: string, steps?: Step[] }
+ Resp: { ok: true, project_id: 'HC-YYYY-###' }
+============================================== */
+export async function POST(req) {
   const origin = req.headers.get('origin');
-  const id = decodeURIComponent(params?.id || '').trim();
-  if (!id) return json({ error: 'Missing id' }, 400, origin);
 
   const key = req.headers.get('x-admin-key');
   if (key !== process.env.ADMIN_KEY) {
+    // Return CORS headers so the browser can read the error
     return json({ error: 'Unauthorized' }, 401, origin);
   }
 
@@ -131,24 +110,20 @@ export async function POST(req, { params }) {
 
   const client_name = (body.client_name || '').trim();
   const status = (body.status || '').trim();
-  const steps = normalizeSteps(body.steps);
-
   if (!client_name || !status) {
     return json({ error: 'Missing client_name or status' }, 400, origin);
   }
 
+  const steps = normalizeSteps(body.steps);
+  const year = new Date().getFullYear();
+  const newId = await generateNextId(year);
+
   try {
     await sql`
       INSERT INTO projects (project_id, client_name, status, steps_json, updated_at)
-      VALUES (${id}, ${client_name}, ${status}, ${JSON.stringify(steps)}, NOW())
-      ON CONFLICT (project_id)
-      DO UPDATE SET
-        client_name = EXCLUDED.client_name,
-        status      = EXCLUDED.status,
-        steps_json  = EXCLUDED.steps_json,
-        updated_at  = NOW()
+      VALUES (${newId}, ${client_name}, ${status}, ${JSON.stringify(steps)}, NOW())
     `;
-    return json({ ok: true }, 200, origin);
+    return json({ ok: true, project_id: newId }, 200, origin);
   } catch (err) {
     console.error(err);
     return json({ error: 'Database error', details: err.message }, 500, origin);
