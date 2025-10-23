@@ -7,10 +7,10 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
     headers: {
-      'content-type': 'application/json',
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'DELETE,PATCH,GET,POST,OPTIONS',
-      'access-control-allow-headers': 'content-type,x-admin-key',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Credentials': 'true',
     },
   });
 
