@@ -8,7 +8,7 @@ const json = (body, status = 200) =>
     status,
     headers: {
       'content-type': 'application/json',
-      'access-control-allow-origin': '*',
+      'access-control-allow-origin': 'https://www.harwoodcarpentry.pro',
       'access-control-allow-methods': 'DELETE,PATCH,GET,POST,OPTIONS',
       'access-control-allow-headers': 'content-type,x-admin-key',
     },
