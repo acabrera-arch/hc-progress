@@ -11,6 +11,7 @@ const json = (body, status = 200) =>
       'access-control-allow-origin': '*',
       'access-control-allow-methods': 'GET,POST,OPTIONS',
       'access-control-allow-headers': 'content-type,x-admin-key',
+      'Access-Control-Allow-Origin': 'https://www.harwoodcarpentry.pro'
     },
   });
 
