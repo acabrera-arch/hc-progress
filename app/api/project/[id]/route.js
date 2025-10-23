@@ -9,9 +9,8 @@ const json = (body, status = 200) =>
     headers: {
       'content-type': 'application/json',
       'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'GET,POST,OPTIONS,PATCH',
+      'access-control-allow-methods': 'DELETE,PATCH,GET,POST,OPTIONS',
       'access-control-allow-headers': 'content-type,x-admin-key',
-      'Access-Control-Allow-Origin': '*'
     },
   });
 
