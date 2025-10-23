@@ -3,25 +3,45 @@ export const runtime = 'nodejs';
 
 import { sql } from '@vercel/postgres';
 
-const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: {
-    'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Access-Control-Allow-Credentials': 'true',
-    },
-  });
+/* ----- CORS helpers ----- */
+const ALLOWED = (process.env.ALLOWED_ORIGINS ??
+  'https://harwoodcarpentry.pro,https://www.harwoodcarpentry.pro')
+  .split(',')
+  .map(s => s.trim());
 
-export async function OPTIONS() {
-  return json({}, 204);
+function buildCorsHeaders(origin) {
+  const allowOrigin = origin && ALLOWED.includes(origin) ? origin : '';
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Vary': 'Origin',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-key',
+    'Access-Control-Max-Age': '86400',
+    ...(allowOrigin ? { 'Access-Control-Allow-Credentials': 'true' } : {}),
+  };
 }
 
-// GET
-export async function GET(_req, { params }) {
+function json(body, status = 200, origin = null) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      ...buildCorsHeaders(origin),
+    },
+  });
+}
+
+/* ----- OPTIONS (preflight) ----- */
+export async function OPTIONS(req) {
+  const origin = req.headers.get('origin');
+  return new Response(null, { status: 204, headers: buildCorsHeaders(origin) });
+}
+
+/* ----- GET /api/project/[id] ----- */
+export async function GET(req, { params }) {
+  const origin = req.headers.get('origin');
   const id = decodeURIComponent(params?.id || '').trim();
-  if (!id) return json({ error: 'Missing id' }, 400);
+  if (!id) return json({ error: 'Missing id' }, 400, origin);
 
   try {
     const { rows } = await sql`
@@ -30,7 +50,7 @@ export async function GET(_req, { params }) {
       WHERE project_id = ${id}
       LIMIT 1
     `;
-    if (!rows.length) return json({ error: 'Not found' }, 404);
+    if (!rows.length) return json({ error: 'Not found' }, 404, origin);
 
     const row = rows[0];
     return json({
@@ -39,28 +59,29 @@ export async function GET(_req, { params }) {
       status: row.status,
       steps: row.steps_json ?? [],
       updated_at: row.updated_at,
-    });
+    }, 200, origin);
   } catch (err) {
     console.error(err);
-    return json({ error: 'Database error', details: err.message }, 500);
+    return json({ error: 'Database error', details: err.message }, 500, origin);
   }
 }
 
-// POST
+/* ----- POST /api/project/[id] (upsert) ----- */
 export async function POST(req, { params }) {
+  const origin = req.headers.get('origin');
   const id = decodeURIComponent(params?.id || '').trim();
-  if (!id) return json({ error: 'Missing id' }, 400);
+  if (!id) return json({ error: 'Missing id' }, 400, origin);
 
   const key = req.headers.get('x-admin-key');
   if (key !== process.env.ADMIN_KEY) {
-    return json({ error: 'Unauthorized' }, 401);
+    return json({ error: 'Unauthorized' }, 401, origin);
   }
 
   let body;
   try {
     body = await req.json();
   } catch {
-    return json({ error: 'Invalid JSON body' }, 400);
+    return json({ error: 'Invalid JSON body' }, 400, origin);
   }
 
   const client_name = (body.client_name || '').trim();
@@ -68,7 +89,7 @@ export async function POST(req, { params }) {
   const steps = Array.isArray(body.steps) ? body.steps : [];
 
   if (!client_name || !status) {
-    return json({ error: 'Missing client_name or status' }, 400);
+    return json({ error: 'Missing client_name or status' }, 400, origin);
   }
 
   try {
@@ -82,9 +103,9 @@ export async function POST(req, { params }) {
         steps_json  = EXCLUDED.steps_json,
         updated_at  = NOW()
     `;
-    return json({ ok: true });
+    return json({ ok: true }, 200, origin);
   } catch (err) {
     console.error(err);
-    return json({ error: 'Database error', details: err.message }, 500);
+    return json({ error: 'Database error', details: err.message }, 500, origin);
   }
 }
