@@ -8,20 +8,32 @@ import { sql } from '@vercel/postgres';
    CORS
 ========================================================= */
 
-const ALLOWED = (
-  process.env.ALLOWED_ORIGINS ??
-  'https://harwoodcarpentry.pro,https://www.harwoodcarpentry.pro'
+const DEFAULT_ALLOWED = [
+  'https://harwoodcarpentry.pro',
+  'https://www.harwoodcarpentry.pro'
+];
+
+const EXTRA_ALLOWED = (
+  process.env.ALLOWED_ORIGINS || ''
 )
   .split(',')
-  .map(s => s.trim());
+  .map(value => value.trim())
+  .filter(Boolean);
+
+const ALLOWED = [
+  ...new Set([
+    ...DEFAULT_ALLOWED,
+    ...EXTRA_ALLOWED
+  ])
+];
 
 if (process.env.NODE_ENV !== 'production') {
   [
     'http://localhost:3000',
     'http://127.0.0.1:3000'
-  ].forEach(o => {
-    if (!ALLOWED.includes(o)) {
-      ALLOWED.push(o);
+  ].forEach(origin => {
+    if (!ALLOWED.includes(origin)) {
+      ALLOWED.push(origin);
     }
   });
 }
@@ -29,22 +41,20 @@ if (process.env.NODE_ENV !== 'production') {
 
 function buildCorsHeaders(origin) {
 
-  const allowOrigin =
-    origin && ALLOWED.includes(origin)
-      ? origin
-      : '';
-
-  return {
-    'Access-Control-Allow-Origin': allowOrigin,
+  const headers = {
     'Vary': 'Origin',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers':
       'Content-Type, Authorization, x-admin-key',
-    'Access-Control-Max-Age': '86400',
-    ...(allowOrigin
-      ? { 'Access-Control-Allow-Credentials': 'true' }
-      : {}),
+    'Access-Control-Max-Age': '86400'
   };
+
+  if (origin && ALLOWED.includes(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+  }
+
+  return headers;
 
 }
 
@@ -65,6 +75,23 @@ function json(body, status = 200, origin = null) {
 }
 
 
+function isAdminRequest(req) {
+
+  const configuredKey =
+    process.env.ADMIN_KEY;
+
+  if (!configuredKey) {
+    return false;
+  }
+
+  return (
+    req.headers.get('x-admin-key') ===
+    configuredKey
+  );
+
+}
+
+
 export async function OPTIONS(req) {
 
   const origin =
@@ -79,7 +106,6 @@ export async function OPTIONS(req) {
   );
 
 }
-
 
 
 /* =========================================================
@@ -217,14 +243,16 @@ const DEFAULT_STEPS = [
 ];
 
 
-
 /* =========================================================
-   JSON HELPER
+   HELPERS
 ========================================================= */
 
 function parseMaybeJson(value) {
 
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return value;
   }
 
@@ -241,11 +269,6 @@ function parseMaybeJson(value) {
 }
 
 
-
-/* =========================================================
-   NORMALIZE STEPS
-========================================================= */
-
 function normalizeSteps(input) {
 
   input =
@@ -253,7 +276,6 @@ function normalizeSteps(input) {
 
   const byId =
     Object.create(null);
-
 
   (
     Array.isArray(input)
@@ -269,7 +291,6 @@ function normalizeSteps(input) {
     }
 
   });
-
 
   return DEFAULT_STEPS.map(defaultStep => {
 
@@ -309,16 +330,10 @@ function normalizeSteps(input) {
 }
 
 
-
-/* =========================================================
-   NORMALIZE TAGS
-========================================================= */
-
 function normalizeTags(input) {
 
   input =
     parseMaybeJson(input);
-
 
   if (
     input === undefined ||
@@ -328,9 +343,7 @@ function normalizeTags(input) {
     return [];
   }
 
-
   let tags;
-
 
   if (Array.isArray(input)) {
 
@@ -348,10 +361,8 @@ function normalizeTags(input) {
 
   }
 
-
   const seen =
     new Set();
-
 
   return tags.filter(tag => {
 
@@ -375,10 +386,26 @@ function normalizeTags(input) {
 }
 
 
+async function getProjectId(context) {
+
+  const params =
+    await context.params;
+
+  return String(
+    params?.id || ''
+  ).trim();
+
+}
+
 
 /* =========================================================
    GET /api/project/[id]
    PUBLIC PROJECT LOOKUP
+
+   IMPORTANT:
+   - Public users can retrieve project progress.
+   - Client email/phone are returned only to an authenticated
+     admin request containing the correct x-admin-key.
 ========================================================= */
 
 export async function GET(req, context) {
@@ -386,17 +413,10 @@ export async function GET(req, context) {
   const origin =
     req.headers.get('origin');
 
-
   try {
 
-    const params =
-      await context.params;
-
     const id =
-      String(
-        params?.id || ''
-      ).trim();
-
+      await getProjectId(context);
 
     if (!id) {
 
@@ -410,21 +430,19 @@ export async function GET(req, context) {
 
     }
 
-
     const { rows } =
       await sql`
 
-      SELECT
-  project_id,
-  client_name,
-  client_email,
-  client_phone,
-  notify_via,
-  status,
-  steps_json,
-  tags_json,
-  updated_at
-          
+        SELECT
+          project_id,
+          client_name,
+          client_email,
+          client_phone,
+          notify_via,
+          status,
+          steps_json,
+          tags_json,
+          updated_at
 
         FROM projects
 
@@ -433,7 +451,6 @@ export async function GET(req, context) {
         LIMIT 1
 
       `;
-
 
     if (!rows.length) {
 
@@ -447,64 +464,68 @@ export async function GET(req, context) {
 
     }
 
-
     const row =
       rows[0];
-
 
     const steps =
       normalizeSteps(
         row.steps_json
       );
 
-
     const tags =
       normalizeTags(
         row.tags_json
       );
 
+    const responseBody = {
+
+      project_id:
+        row.project_id,
+
+      client_name:
+        row.client_name,
+
+      status:
+        row.status,
+
+      tags:
+        tags,
+
+      project_tags:
+        tags,
+
+      steps:
+        steps,
+
+      steps_json:
+        steps,
+
+      updated_at:
+        row.updated_at
+
+    };
+
+    /*
+     * Contact information is intentionally admin-only.
+     */
+    if (isAdminRequest(req)) {
+
+      responseBody.client_email =
+        row.client_email || '';
+
+      responseBody.client_phone =
+        row.client_phone || '';
+
+      responseBody.notify_via =
+        row.notify_via || 'email';
+
+    }
 
     return json(
-      {
-
-        project_id:
-          row.project_id,
-
-   client_name:
-  row.client_name,
-
-client_email:
-  row.client_email || '',
-
-client_phone:
-  row.client_phone || '',
-
-notify_via:
-  row.notify_via || 'email',
-
-status:
-  row.status,
-
-        tags:
-          tags,
-
-        project_tags:
-          tags,
-
-        steps:
-          steps,
-
-        steps_json:
-          steps,
-
-        updated_at:
-          row.updated_at
-
-      },
+      responseBody,
       200,
       origin
     );
-
 
   } catch (err) {
 
@@ -513,11 +534,13 @@ status:
       err
     );
 
-
     return json(
       {
         error:'Database error',
-        details:err.message
+        details:
+          err instanceof Error
+            ? err.message
+            : String(err)
       },
       500,
       origin
@@ -526,7 +549,6 @@ status:
   }
 
 }
-
 
 
 /* =========================================================
@@ -539,19 +561,10 @@ export async function POST(req, context) {
   const origin =
     req.headers.get('origin');
 
-
-  /* -------------------------
-     Admin authentication
-  ------------------------- */
-
-  const key =
-    req.headers.get('x-admin-key');
-
-
-  if (
-    key !==
-    process.env.ADMIN_KEY
-  ) {
+  /*
+   * Admin authentication
+   */
+  if (!isAdminRequest(req)) {
 
     return json(
       {
@@ -563,20 +576,11 @@ export async function POST(req, context) {
 
   }
 
-
-  /* -------------------------
-     Project ID from URL
-  ------------------------- */
-
-  const params =
-    await context.params;
-
-
+  /*
+   * Project ID
+   */
   const id =
-    String(
-      params?.id || ''
-    ).trim();
-
+    await getProjectId(context);
 
   if (!id) {
 
@@ -590,13 +594,10 @@ export async function POST(req, context) {
 
   }
 
-
-  /* -------------------------
-     Body
-  ------------------------- */
-
+  /*
+   * Request body
+   */
   let body;
-
 
   try {
 
@@ -615,35 +616,44 @@ export async function POST(req, context) {
 
   }
 
+  /*
+   * Fields
+   */
+  const client_name =
+    String(
+      body.client_name ??
+      body.client ??
+      ''
+    ).trim();
 
-  /* -------------------------
-     Fields
-  ------------------------- */
+  const client_email =
+    String(
+      body.client_email ??
+      body.email ??
+      ''
+    ).trim();
 
-const client_email =
-  String(
-    body.client_email ??
-    ''
-  ).trim();
+  const client_phone =
+    String(
+      body.client_phone ??
+      body.phone ??
+      ''
+    ).trim();
 
+  const notify_via =
+    String(
+      body.notify_via ??
+      body.notification_method ??
+      'email'
+    )
+      .trim()
+      .toLowerCase();
 
-const client_phone =
-  String(
-    body.client_phone ??
-    ''
-  ).trim();
-
-
-const notify_via =
-  String(
-    body.notify_via ??
-    'email'
-  ).trim();
+  const status =
     String(
       body.status ??
       'On Track'
     ).trim();
-
 
   if (!client_name) {
 
@@ -657,6 +667,29 @@ const notify_via =
 
   }
 
+  const validNotificationMethods =
+    new Set([
+      'email',
+      'sms',
+      'both',
+      'none'
+    ]);
+
+  if (
+    !validNotificationMethods.has(
+      notify_via
+    )
+  ) {
+
+    return json(
+      {
+        error:'Invalid notification method'
+      },
+      400,
+      origin
+    );
+
+  }
 
   const steps =
     normalizeSteps(
@@ -664,106 +697,99 @@ const notify_via =
       body.steps_json
     );
 
-
   const tags =
     normalizeTags(
       body.tags ??
       body.project_tags
     );
 
-
-  /* -------------------------
-     UPSERT
-     Creates project if missing.
-     Updates project if existing.
-  ------------------------- */
-
+  /*
+   * UPSERT
+   */
   try {
 
     const { rows } =
-  await sql`
-    INSERT INTO projects
-    (
-      project_id,
-      client_name,
-      client_email,
-      client_phone,
-      notify_via,
-      status,
-      steps_json,
-      tags_json,
-      updated_at
-    )
+      await sql`
 
-    VALUES
-    (
-      ${id},
-      ${client_name},
-      ${client_email || null},
-      ${client_phone || null},
-      ${notify_via},
-      ${status},
-      CAST(${JSON.stringify(steps)} AS jsonb),
-      CAST(${JSON.stringify(tags)} AS jsonb),
-      NOW()
-    )
+        INSERT INTO projects
+        (
+          project_id,
+          client_name,
+          client_email,
+          client_phone,
+          notify_via,
+          status,
+          steps_json,
+          tags_json,
+          updated_at
+        )
 
-    ON CONFLICT (project_id)
+        VALUES
+        (
+          ${id},
+          ${client_name},
+          ${client_email || null},
+          ${client_phone || null},
+          ${notify_via},
+          ${status},
+          CAST(${JSON.stringify(steps)} AS jsonb),
+          CAST(${JSON.stringify(tags)} AS jsonb),
+          NOW()
+        )
 
-    DO UPDATE SET
+        ON CONFLICT (project_id)
 
-      client_name =
-        EXCLUDED.client_name,
+        DO UPDATE SET
 
-      client_email =
-        EXCLUDED.client_email,
+          client_name =
+            EXCLUDED.client_name,
 
-      client_phone =
-        EXCLUDED.client_phone,
+          client_email =
+            EXCLUDED.client_email,
 
-      notify_via =
-        EXCLUDED.notify_via,
+          client_phone =
+            EXCLUDED.client_phone,
 
-      status =
-        EXCLUDED.status,
+          notify_via =
+            EXCLUDED.notify_via,
 
-      steps_json =
-        EXCLUDED.steps_json,
+          status =
+            EXCLUDED.status,
 
-      tags_json =
-        EXCLUDED.tags_json,
+          steps_json =
+            EXCLUDED.steps_json,
 
-      updated_at =
-        NOW()
+          tags_json =
+            EXCLUDED.tags_json,
 
-    RETURNING
-      project_id,
-      client_name,
-      client_email,
-      client_phone,
-      notify_via,
-      status,
-      steps_json,
-      tags_json,
-      updated_at
-  `;
+          updated_at =
+            NOW()
 
+        RETURNING
+          project_id,
+          client_name,
+          client_email,
+          client_phone,
+          notify_via,
+          status,
+          steps_json,
+          tags_json,
+          updated_at
+
+      `;
 
     const row =
       rows[0];
-
 
     const savedSteps =
       normalizeSteps(
         row.steps_json
       );
 
-
     const savedTags =
       normalizeTags(
         row.tags_json
       );
-
 
     return json(
       {
@@ -773,20 +799,20 @@ const notify_via =
         project_id:
           row.project_id,
 
-    client_name:
-  row.client_name,
+        client_name:
+          row.client_name,
 
-client_email:
-  row.client_email || '',
+        client_email:
+          row.client_email || '',
 
-client_phone:
-  row.client_phone || '',
+        client_phone:
+          row.client_phone || '',
 
-notify_via:
-  row.notify_via || 'email',
+        notify_via:
+          row.notify_via || 'email',
 
-status:
-  row.status,
+        status:
+          row.status,
 
         tags:
           savedTags,
@@ -808,7 +834,6 @@ status:
       origin
     );
 
-
   } catch (err) {
 
     console.error(
@@ -816,16 +841,13 @@ status:
       err
     );
 
-
     return json(
       {
-
-        error:
-          'Database error',
-
+        error:'Database error',
         details:
-          err.message
-
+          err instanceof Error
+            ? err.message
+            : String(err)
       },
       500,
       origin
