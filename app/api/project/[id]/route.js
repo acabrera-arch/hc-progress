@@ -414,13 +414,17 @@ export async function GET(req, context) {
     const { rows } =
       await sql`
 
-        SELECT
-          project_id,
-          client_name,
-          status,
-          steps_json,
-          tags_json,
-          updated_at
+      SELECT
+  project_id,
+  client_name,
+  client_email,
+  client_phone,
+  notify_via,
+  status,
+  steps_json,
+  tags_json,
+  updated_at
+          
 
         FROM projects
 
@@ -466,11 +470,20 @@ export async function GET(req, context) {
         project_id:
           row.project_id,
 
-        client_name:
-          row.client_name,
+   client_name:
+  row.client_name,
 
-        status:
-          row.status,
+client_email:
+  row.client_email || '',
+
+client_phone:
+  row.client_phone || '',
+
+notify_via:
+  row.notify_via || 'email',
+
+status:
+  row.status,
 
         tags:
           tags,
@@ -607,15 +620,25 @@ export async function POST(req, context) {
      Fields
   ------------------------- */
 
-  const client_name =
-    String(
-      body.client_name ??
-      body.client ??
-      ''
-    ).trim();
+const client_email =
+  String(
+    body.client_email ??
+    ''
+  ).trim();
 
 
-  const status =
+const client_phone =
+  String(
+    body.client_phone ??
+    ''
+  ).trim();
+
+
+const notify_via =
+  String(
+    body.notify_via ??
+    'email'
+  ).trim();
     String(
       body.status ??
       'On Track'
@@ -658,56 +681,72 @@ export async function POST(req, context) {
   try {
 
     const { rows } =
-      await sql`
+  await sql`
+    INSERT INTO projects
+    (
+      project_id,
+      client_name,
+      client_email,
+      client_phone,
+      notify_via,
+      status,
+      steps_json,
+      tags_json,
+      updated_at
+    )
 
-        INSERT INTO projects
-        (
-          project_id,
-          client_name,
-          status,
-          steps_json,
-          tags_json,
-          updated_at
-        )
+    VALUES
+    (
+      ${id},
+      ${client_name},
+      ${client_email || null},
+      ${client_phone || null},
+      ${notify_via},
+      ${status},
+      CAST(${JSON.stringify(steps)} AS jsonb),
+      CAST(${JSON.stringify(tags)} AS jsonb),
+      NOW()
+    )
 
-        VALUES
-        (
-          ${id},
-          ${client_name},
-          ${status},
-          CAST(${JSON.stringify(steps)} AS jsonb),
-          CAST(${JSON.stringify(tags)} AS jsonb),
-          NOW()
-        )
+    ON CONFLICT (project_id)
 
-        ON CONFLICT (project_id)
+    DO UPDATE SET
 
-        DO UPDATE SET
+      client_name =
+        EXCLUDED.client_name,
 
-          client_name =
-            EXCLUDED.client_name,
+      client_email =
+        EXCLUDED.client_email,
 
-          status =
-            EXCLUDED.status,
+      client_phone =
+        EXCLUDED.client_phone,
 
-          steps_json =
-            EXCLUDED.steps_json,
+      notify_via =
+        EXCLUDED.notify_via,
 
-          tags_json =
-            EXCLUDED.tags_json,
+      status =
+        EXCLUDED.status,
 
-          updated_at =
-            NOW()
+      steps_json =
+        EXCLUDED.steps_json,
 
-        RETURNING
-          project_id,
-          client_name,
-          status,
-          steps_json,
-          tags_json,
-          updated_at
+      tags_json =
+        EXCLUDED.tags_json,
 
-      `;
+      updated_at =
+        NOW()
+
+    RETURNING
+      project_id,
+      client_name,
+      client_email,
+      client_phone,
+      notify_via,
+      status,
+      steps_json,
+      tags_json,
+      updated_at
+  `;
 
 
     const row =
@@ -734,11 +773,20 @@ export async function POST(req, context) {
         project_id:
           row.project_id,
 
-        client_name:
-          row.client_name,
+    client_name:
+  row.client_name,
 
-        status:
-          row.status,
+client_email:
+  row.client_email || '',
+
+client_phone:
+  row.client_phone || '',
+
+notify_via:
+  row.notify_via || 'email',
+
+status:
+  row.status,
 
         tags:
           savedTags,
