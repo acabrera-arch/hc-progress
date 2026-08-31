@@ -269,6 +269,76 @@ function parseMaybeJson(value) {
 }
 
 
+function normalizeStepStatus(step, fallbackDone = false) {
+
+  const raw =
+    String(
+      step?.status ??
+      step?.step_status ??
+      step?.state ??
+      ''
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ');
+
+  /*
+   * Explicit 3-state status wins over the legacy done boolean.
+   */
+  if (
+    raw === 'in progress' ||
+    raw === 'inprogress' ||
+    raw === 'progress' ||
+    raw === 'active' ||
+    raw === 'started'
+  ) {
+    return 'in_progress';
+  }
+
+  if (
+    raw === 'done' ||
+    raw === 'complete' ||
+    raw === 'completed'
+  ) {
+    return 'done';
+  }
+
+  if (
+    raw === 'not started' ||
+    raw === 'notstarted' ||
+    raw === 'pending' ||
+    raw === 'todo' ||
+    raw === 'to do' ||
+    raw === 'waiting' ||
+    raw === 'upcoming'
+  ) {
+    return 'not_started';
+  }
+
+  /*
+   * Backward compatibility for existing projects that only
+   * have done:true / done:false.
+   */
+  if (typeof step?.done === 'boolean') {
+    return step.done
+      ? 'done'
+      : 'not_started';
+  }
+
+  if (typeof step?.completed === 'boolean') {
+    return step.completed
+      ? 'done'
+      : 'not_started';
+  }
+
+  return fallbackDone
+    ? 'done'
+    : 'not_started';
+
+}
+
+
 function normalizeSteps(input) {
 
   input =
@@ -297,6 +367,12 @@ function normalizeSteps(input) {
     const saved =
       byId[defaultStep.id] || {};
 
+    const status =
+      normalizeStepStatus(
+        saved,
+        !!defaultStep.done
+      );
+
     return {
 
       id:
@@ -320,14 +396,29 @@ function normalizeSteps(input) {
         saved.date ??
         '',
 
+      /*
+       * NEW 3-STATE STEP STATUS
+       *
+       * not_started
+       * in_progress
+       * done
+       */
+      status:
+        status,
+
+      /*
+       * Legacy field retained so older viewer/admin code
+       * remains compatible.
+       */
       done:
-        !!saved.done
+        status === 'done'
 
     };
 
   });
 
 }
+
 
 
 function normalizeTags(input) {
